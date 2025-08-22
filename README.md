@@ -53,4 +53,4 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 This project is licensed under the [MIT License](LICENSE).
 
 ## Contact
-For questions or support, please open an issue or contact the maintainer via [LinkedIn](https://www.linkedin.com/in/iamgeekspe/).
+For questions or support, please open an issue or contact the maintainer via [X](https://www.x.com/elxecutor/).
