@@ -1,26 +1,18 @@
-"""
-FPL Element JSON to CSV Parser
-This script extracts every possible detail from a FPL element JSON file (such as `fpl_element1.json`) and flattens all data into a single row in a CSV file. All endpoints (fixtures, history, history_past) are included as columns.
-"""
 
 import requests
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# List of player info fields (these will come first in the CSV)
 player_info_fields = [
     'can_transact','can_select','chance_of_playing_next_round','chance_of_playing_this_round','code','cost_change_event','cost_change_event_fall','cost_change_start','cost_change_start_fall','dreamteam_count','element_type','ep_next','ep_this','event_points','first_name','form','id','in_dreamteam','news','news_added','now_cost','photo','points_per_game','removed','second_name','selected_by_percent','special','squad_number','status','team','team_code','total_points','transfers_in','transfers_in_event','transfers_out','transfers_out_event','value_form','value_season','web_name','region','team_join_date','birth_date','has_temporary_code','opta_code','minutes','goals_scored','assists','clean_sheets','goals_conceded','own_goals','penalties_saved','penalties_missed','yellow_cards','red_cards','saves','bonus','bps','influence','creativity','threat','ict_index','clearances_blocks_interceptions','recoveries','tackles','defensive_contribution','starts','expected_goals','expected_assists','expected_goal_involvements','expected_goals_conceded','influence_rank','influence_rank_type','creativity_rank','creativity_rank_type','threat_rank','threat_rank_type','ict_index_rank','ict_index_rank_type','corners_and_indirect_freekicks_order','corners_and_indirect_freekicks_text','direct_freekicks_order','direct_freekicks_text','penalties_order','penalties_text','expected_goals_per_90','saves_per_90','expected_assists_per_90','expected_goal_involvements_per_90','expected_goals_conceded_per_90','goals_conceded_per_90','now_cost_rank','now_cost_rank_type','form_rank','form_rank_type','points_per_game_rank','points_per_game_rank_type','selected_rank','selected_rank_type','starts_per_90','clean_sheets_per_90','defensive_contribution_per_90'
 ]
 
-# Add derived fields for clarity
 extra_fields = ['team_name', 'position', 'player_id', 'player_name']
 
-# History past fields (for up to 4 seasons, most recent first)
 history_past_fields = [
     'season_name','element_code','start_cost','end_cost','total_points','minutes','goals_scored','assists','clean_sheets','goals_conceded','own_goals','penalties_saved','penalties_missed','yellow_cards','red_cards','saves','bonus','bps','influence','creativity','threat','ict_index','clearances_blocks_interceptions','recoveries','tackles','defensive_contribution','starts','expected_goals','expected_assists','expected_goal_involvements','expected_goals_conceded'
 ]
 
-# Fetch bootstrap-static JSON
 bootstrap_url = 'https://fantasy.premierleague.com/api/bootstrap-static/'
 bootstrap_response = requests.get(bootstrap_url)
 if bootstrap_response.status_code == 200:
@@ -73,7 +65,6 @@ with ThreadPoolExecutor(max_workers=16) as executor:
     for future in as_completed(futures):
         all_rows.append(future.result())
 
-# Compose final column order: player info, extra fields, then history_past fields for 4 seasons
 final_columns = player_info_fields + extra_fields + [
     f'history_past_{i+1}_{k}'
     for i in range(4)
@@ -84,5 +75,5 @@ df = pd.DataFrame(all_rows)
 df = df.fillna(0)
 df = df[final_columns]
 df = df.sort_values('player_id')
-df.to_csv('players.csv', index=False)
-print('Exported correct history_past data for all players to players.csv.')
+df.to_csv('data/players.csv', index=False)
+print('Exported correct history_past data for all players to data/players.csv.')
