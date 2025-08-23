@@ -1,6 +1,7 @@
 
 import requests
 import pandas as pd
+pd.set_option('future.no_silent_downcasting', True)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 player_info_fields = [
@@ -72,7 +73,7 @@ final_columns = player_info_fields + extra_fields + [
 ]
 
 df = pd.DataFrame(all_rows)
-df = df.fillna(0)
+df = df.fillna(0).infer_objects(copy=False)
 df = df[final_columns]
 df = df.sort_values('player_id')
 df.to_csv('data/players.csv', index=False)
