@@ -1,20 +1,49 @@
+import sys
+if sys.version_info >= (3, 13):
+    import multiprocessing.resource_tracker as rt
+    def fix_semlock_leak():
+        orig = rt.register
+        def register(name, rtype):
+            if rtype == "semlock":
+                return
+            return orig(name, rtype)
+        rt.register = register
+    fix_semlock_leak()
+
+def safe_n_jobs():
+    return 1 if sys.version_info >= (3, 13) else -1
+
+def safe_parallel_fit(model, X, y):
+    if sys.version_info >= (3, 13):
+        from joblib import parallel_backend
+        with parallel_backend("threading"):
+            return model.fit(X, y)
+    else:
+        return model.fit(X, y)
+
+def safe_cross_val_predict(model, X, y, cv):
+    if sys.version_info >= (3, 13):
+        from joblib import parallel_backend
+        with parallel_backend("threading"):
+            return cross_val_predict(model, X, y, cv=cv, n_jobs=1)
+    else:
+        return cross_val_predict(model, X, y, cv=cv, n_jobs=-1)
+
 
 import pandas as pd
 import numpy as np
 import os
-from sklearn.model_selection import train_test_split
+import pulp
+from sklearn.model_selection import train_test_split, cross_val_predict
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error
+from sklearn.preprocessing import StandardScaler
+from xgboost import XGBRegressor
+import optuna
 
-try:
-    from xgboost import XGBRegressor
-    XGB_AVAILABLE = True
-except Exception:
-    XGB_AVAILABLE = False
-try:
-    import pulp
-except Exception as e:
-    raise ImportError("PuLP is required for the optimization. Install with: pip install pulp")
+RANDOM_SEED = 42
+np.random.seed(RANDOM_SEED)
 
 CSV_PATH = 'data/players.csv'
 BUDGET = 1000  # FPL uses 1000 tenths = 100.0m
@@ -40,9 +69,9 @@ def load_data(path=CSV_PATH):
 def featurize(df):
     df = df.copy()
     features = pd.DataFrame()
-    for col in ['ep_next','ep_this','form','points_per_game','now_cost','total_points','minutes','selected_by_percent','value_form','value_season','ict_index']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    # Use all numeric columns except identifiers and text columns for modeling
+    exclude_cols = ['player_id', 'player_name', 'web_name', 'first_name', 'second_name', 'team_name', 'team', 'position', 'status', 'photo', 'region', 'team_join_date', 'birth_date', 'player_name', 'team', 'team_code', 'team_short_name', 'next_opponent_name', 'next_opponent_short_name']
+    # Always keep identifiers and key info
     features['player_id'] = df.get('player_id', df.get('id'))
     features['player_name'] = df.get('player_name', df.get('web_name'))
     features['team'] = df.get('team_name', df.get('team'))
@@ -60,17 +89,12 @@ def featurize(df):
             return 'FWD'
         return None
     features['position'] = df.get('position').apply(normalize_position)
-    predictive_features = [
-        'ep_next', 'form', 'points_per_game', 'minutes', 'starts', 'chance_of_playing_next_round', 'status',
-        'expected_goals', 'expected_assists', 'expected_goal_involvements', 'expected_goals_conceded',
-        'expected_goals_per_90', 'expected_assists_per_90', 'expected_goal_involvements_per_90', 'expected_goals_conceded_per_90',
-        'total_points', 'bps', 'bonus', 'value_form', 'value_season',
-        'clean_sheets', 'clean_sheets_per_90', 'goals_scored', 'assists', 'saves', 'saves_per_90',
-        'selected_by_percent', 'transfers_in_event', 'transfers_out_event', 'now_cost'
-    ]
-    for col in predictive_features:
-        if col in df.columns:
+    # Add all numeric columns except excluded ones
+    for col in df.columns:
+        if col not in exclude_cols:
+            # Try to convert to numeric, fillna with 0
             features[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    # Add per-90 features if not present
     per90_map = {
         'goals_scored': 'goals_scored_per_90',
         'assists': 'assists_per_90',
@@ -92,28 +116,77 @@ def featurize(df):
 
 
 def train_model(features, df, target_col='ep_next'):
-    if 'ep_next' in df.columns:
-        y = pd.to_numeric(df['ep_next'], errors='coerce').fillna(0)
-        print("Using provided target column 'ep_next' for supervised training.")
+    if target_col in df.columns:
+        y = pd.to_numeric(df[target_col], errors='coerce').fillna(0)
+        print(f"Using provided target column '{target_col}' for supervised training.")
     else:
-        y = pd.to_numeric(df.get('ep_next', 0), errors='coerce').fillna(0)
-        print("No labeled 'ep_next' column found. Using 'ep_next' as proxy target for MVP training.")
+        y = pd.to_numeric(df.get(target_col, 0), errors='coerce').fillna(0)
+        print(f"No labeled '{target_col}' column found. Using '{target_col}' as proxy target for MVP training.")
     X = features.drop(['player_id','player_name','team','position','orig_index'], axis=1, errors='ignore')
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
-    if XGB_AVAILABLE:
-        model = XGBRegressor(n_estimators=200, random_state=42, verbosity=0)
-    else:
-        model = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)
-    model.fit(X_train, y_train)
-    preds = model.predict(X_val)
-    rmse = np.sqrt(mean_squared_error(y_val, preds))
-    print(f"Validation RMSE: {rmse:.4f}")
-    all_preds = model.predict(X)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    X_train, X_val, y_train, y_val = train_test_split(X_scaled, y, test_size=0.2, random_state=RANDOM_SEED)
+
+    # Hyperparameter tuning for XGBoost
+    def objective(trial):
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 100, 400),
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3),
+            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+            'reg_alpha': trial.suggest_float('reg_alpha', 0, 2),
+            'reg_lambda': trial.suggest_float('reg_lambda', 0, 2),
+            'random_state': RANDOM_SEED,
+            'verbosity': 0,
+            'n_jobs': safe_n_jobs()
+        }
+        model = XGBRegressor(**params)
+        safe_parallel_fit(model, X_train, y_train)
+        preds = model.predict(X_val)
+        rmse = np.sqrt(mean_squared_error(y_val, preds))
+        return rmse
+    import optuna
+    study = optuna.create_study(direction='minimize')
+    study.optimize(objective, n_trials=30, show_progress_bar=False)
+    xgb_params = study.best_params
+    xgb_params['random_state'] = RANDOM_SEED
+    xgb_params['verbosity'] = 0
+    xgb_params['n_jobs'] = safe_n_jobs()
+    # Estimate uncertainty using cross-validation std
+    xgb = XGBRegressor(**xgb_params)
+    safe_parallel_fit(xgb, X_train, y_train)
+    xgb_preds = xgb.predict(X_scaled)
+    # Use cross_val_predict to get CV predictions for std estimation
+    cv_preds = safe_cross_val_predict(xgb, X_scaled, y, cv=5)
+    # For each player, estimate std as abs diff between model pred and CV pred
+    uncertainty = np.abs(xgb_preds - cv_preds)
+
+    # RandomForest
+    rf = RandomForestRegressor(n_estimators=200, random_state=RANDOM_SEED, n_jobs=safe_n_jobs())
+    safe_parallel_fit(rf, X_train, y_train)
+    rf_preds = rf.predict(X_scaled)
+
+    # Ridge Regression
+    from sklearn.linear_model import Ridge
+    ridge = Ridge(random_state=RANDOM_SEED)
+    safe_parallel_fit(ridge, X_train, y_train)
+    ridge_preds = ridge.predict(X_scaled)
+
+    # Stacking ensemble
+    stack_X = np.vstack([xgb_preds, rf_preds, ridge_preds]).T
+    meta = Ridge(random_state=RANDOM_SEED)
+    safe_parallel_fit(meta, stack_X, y)
+    stacked_preds = meta.predict(stack_X)
+
+    rmse = np.sqrt(mean_squared_error(y, stacked_preds))
+    print(f"Stacked Model RMSE: {rmse:.4f}")
     pred_df = pd.DataFrame({
         'player_id': features['player_id'],
-        'predicted_points': all_preds
+        'predicted_points': stacked_preds,
+        'predicted_points_std': uncertainty
     })
-    return model, all_preds, pred_df
+    return (xgb, rf, ridge, meta), stacked_preds, pred_df
 
 
 def optimize_squad(df, features, preds, budget=BUDGET, max_per_team=MAX_PER_TEAM):
@@ -191,10 +264,17 @@ def pick_starting_xi_and_captain(squad):
     best_lineup_ordered = best_lineup_ordered.sort_values(['pos_order', 'predicted_points'], ascending=[True, False]).drop(columns=['pos_order']).reset_index(drop=True)
 
     ordered = best_lineup_ordered.reset_index(drop=True)
-    captain = ordered.loc[0]
-    vice = ordered.loc[1]
+    # Ensure captain and vice-captain have chance_of_playing_this_round > 75
+    xi = ordered.copy()
+    xi = xi[xi['chance_of_playing_this_round'] > 75]
+    if len(xi) < 2:
+        print("ERROR: Not enough starters with >75% chance of playing for captain/vice.")
+        captain = ordered.loc[0]
+        vice = ordered.loc[1]
+    else:
+        captain = xi.iloc[0]
+        vice = xi.iloc[1]
     bench = squad[~squad.index.isin(best_lineup.index)].sort_values('predicted_points', ascending=False)
-
     return {
         'formation': best_formation,
         'starting_xi': best_lineup_ordered,
@@ -210,6 +290,7 @@ def main():
     model, preds, pred_df = train_model(features, df_original, target_col='ep_next')
 
     df_original['predicted_points'] = pred_df['predicted_points']
+    df_original['predicted_points_std'] = pred_df['predicted_points_std']
     pred_df.to_csv('data/predicted.csv', index=False)
     print("Saved predicted points to data/predicted.csv")
     squad = optimize_squad(df_original, features, pred_df['predicted_points'], budget=BUDGET, max_per_team=MAX_PER_TEAM)
@@ -220,21 +301,25 @@ def main():
         return
 
     print('\n=== Best Starting XI & Captain ===')
-    out_cols = ['player_name','team_name','position','now_cost','predicted_points']
+    out_cols = ['player_name','team_name','position','now_cost','predicted_points','predicted_points_std']
     print(f"Formation: {selection['formation']}")
     pos_order = ['GKP', 'DEF', 'MID', 'FWD']
     xi_sorted = selection['starting_xi'].copy()
     xi_sorted['pos_order'] = xi_sorted['position'].apply(lambda x: pos_order.index(str(x).upper()) if str(x).upper() in pos_order else 99)
     xi_sorted = xi_sorted.sort_values(['pos_order', 'predicted_points'], ascending=[True, False]).drop(columns=['pos_order'])
     print(xi_sorted[out_cols].to_string(index=False))
-    print(f"Captain: {selection['captain']['player_name']} ({selection['captain']['predicted_points']:.2f})")
-    print(f"Vice-Captain: {selection['vice_captain']['player_name']} ({selection['vice_captain']['predicted_points']:.2f})")
+    print(f"Captain: {selection['captain']['player_name']} ({selection['captain']['predicted_points']:.2f} ± {selection['captain']['predicted_points_std']:.2f})")
+    print(f"Vice-Captain: {selection['vice_captain']['player_name']} ({selection['vice_captain']['predicted_points']:.2f} ± {selection['vice_captain']['predicted_points_std']:.2f})")
 
     print('\n=== Bench ===')
     bench_sorted = selection['bench'].copy()
     bench_sorted['pos_order'] = bench_sorted['position'].apply(lambda x: pos_order.index(str(x).upper()) if str(x).upper() in pos_order else 99)
     bench_sorted = bench_sorted.sort_values(['pos_order', 'predicted_points'], ascending=[True, False]).drop(columns=['pos_order'])
     print(bench_sorted[out_cols].to_string(index=False))
+
+    # Output projected team points for the gameweek
+    projected_points = xi_sorted['predicted_points'].sum()
+    print(f"\nProjected team points for the gameweek: {projected_points:.2f}")
 
 
 if __name__ == '__main__':
