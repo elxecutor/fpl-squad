@@ -117,6 +117,10 @@ def featurize(df):
 
 def train_model(features, df, target_col='ep_next'):
     if target_col in df.columns:
+        # Use all history, last5, and fixture columns as features
+        for col in df.columns:
+            if 'history' in col or 'last5' in col or 'fixture' in col:
+                features[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         y = pd.to_numeric(df[target_col], errors='coerce').fillna(0)
         print(f"Using provided target column '{target_col}' for supervised training.")
     else:
