@@ -325,6 +325,37 @@ def main():
     projected_points = xi_sorted['predicted_points'].sum()
     print(f"\nProjected team points for the gameweek: {projected_points:.2f}")
 
+    # Compile output details as JSON for website integration
+    import json
+    def df_to_dict(df, cols):
+        def convert(val):
+            if isinstance(val, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+                return int(val)
+            if isinstance(val, (np.floating, np.float64, np.float32, np.float16)):
+                return float(val)
+            return val if val is None or isinstance(val, (str, int, float, bool)) else str(val)
+        return [ {col: convert(row[col]) for col in cols if col in row} for row in df[cols].to_dict(orient='records') ]
+
+    def row_to_dict(row, cols):
+        def convert(val):
+            if isinstance(val, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+                return int(val)
+            if isinstance(val, (np.floating, np.float64, np.float32, np.float16)):
+                return float(val)
+            return val if val is None or isinstance(val, (str, int, float, bool)) else str(val)
+        return {col: convert(row[col]) for col in cols if col in row}
+
+    output_json = {
+        'formation': selection['formation'],
+        'starting_xi': df_to_dict(xi_sorted, out_cols),
+        'captain': row_to_dict(selection['captain'], out_cols),
+        'vice_captain': row_to_dict(selection['vice_captain'], out_cols),
+        'bench': df_to_dict(bench_sorted, out_cols),
+        'projected_points': round(float(projected_points), 2)
+    }
+    with open('data/squad_output.json', 'w') as f:
+        json.dump(output_json, f, indent=2)
+    print("\nSaved squad output details to data/squad_output.json for website integration.")
 
 if __name__ == '__main__':
     main()

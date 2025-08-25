@@ -31,11 +31,8 @@ element_types = bootstrap_data['element_types']
 team_id_to_name = {team['id']: team['name'] for team in teams}
 position_id_to_short = {etype['id']: etype['singular_name_short'] for etype in element_types}
 
-# Only load fpl.json for opponent details (strength, short_name, etc.)
-with open('data/fpl.json', 'r') as f:
-    fpl_data = json.load(f)
-teams_data = fpl_data['teams']
-team_id_to_details = {team['id']: team for team in teams_data}
+# Use bootstrap-static data for opponent details (strength, short_name, etc.)
+team_id_to_details = {team['id']: team for team in teams}
 
 def fetch_history_past(player):
     # Start with player info fields
