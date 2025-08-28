@@ -1,6 +1,6 @@
 # FPL Squad Optimizer
 
-Tools for extracting, predicting, and optimizing Fantasy Premier League (FPL) squads using machine learning and mathematical optimization.
+Tools for extracting, predicting, and optimizing Fantasy Premier League (FPL) squads using machine learning. Includes dynamic formation selection, bench output, and full JSON export for frontend use.
 
 ## Table of Contents
 - [Features](#features)
@@ -12,11 +12,12 @@ Tools for extracting, predicting, and optimizing Fantasy Premier League (FPL) sq
 - [Contact](#contact)
 
 ## Features
-- **Data Extraction**: Fetches and flattens all FPL player data from the official API, including historical stats, and exports to `players.csv`.
-- **Squad Optimization**: Loads player data, builds ML features, predicts next gameweek points, and selects the optimal 15-player squad and starting XI under FPL rules and budget constraints.
-- **ML Prediction**: Uses XGBoost (if available) or RandomForest to predict expected points for each player.
-- **Integer Linear Programming**: Uses PuLP to maximize squad points while respecting FPL constraints (budget, positions, max players per team).
-- **Flexible Formation**: Automatically selects the best starting XI and formation.
+- **Data Extraction & Feature Engineering**: Reshapes and engineers FPL player data for ML prediction.
+- **ML Prediction**: Uses Ridge and XGBoost (Optuna tuning) to predict next gameweek points for each player.
+- **Squad Optimization**: Selects the optimal 15-player squad, starting XI, captain, vice-captain, and bench under FPL rules and budget constraints.
+- **Dynamic Formations**: Automatically selects the best formation (or user-specified) for the starting XI.
+- **Bench Output**: Clearly separates starting XI and bench in both console and JSON output.
+- **JSON Export**: Outputs full squad, starting XI, bench, captain, vice-captain, and formation to `optimal_squad.json` for frontend integration.
 
 ## Installation
 Clone the repository and install dependencies:
@@ -28,22 +29,38 @@ pip install -r requirements.txt
 ```
 
 ## Usage
-1. **Export player data**:
+1. **Extract FPL player data**:
 	```bash
 	python export.py
 	```
-	This will create `players.csv` with all player details.
-2. **Run squad optimizer**:
+	This will fetch and flatten FPL player data from the API, saving it to `players.csv`.
+2. **Run the full pipeline**:
 	```bash
-	python squad.py
+	python mvp_pipeline.py
 	```
-	This will output the optimized squad, starting XI, captain/vice, and save predictions to `predicted.csv`.
+	This will reshape data, engineer features, and output `players_timeseries.csv`.
+3. **Train the model and predict points**:
+	```bash
+	python train_model.py
+	```
+	This will train ML models and output predictions to `predicted_next_gw.csv`.
+4. **Optimize squad selection**:
+	```bash
+	python squad_optimizer.py
+	# Or specify a formation:
+	python squad_optimizer.py 3-5-2
+	```
+	This will output the optimal squad, starting XI (sorted by position), bench, captain, vice-captain, and formation in both console and `optimal_squad.json`.
 
 ## File Overview
 - `export.py`: Extracts and flattens FPL player data from the API to `players.csv`.
-- `squad.py`: Loads `players.csv`, predicts points, and optimizes squad selection.
+- `mvp_pipeline.py`: Reshapes and engineers features for ML prediction, outputs `players_timeseries.csv`.
+- `train_model.py`: Trains ML models and outputs predicted points to `predicted_next_gw.csv`.
+- `squad_optimizer.py`: Loads predictions, optimizes squad selection, outputs starting XI, bench, captain, vice-captain, and formation in both console and `optimal_squad.json`.
 - `players.csv`: Output player data for ML and optimization.
-- `predicted.csv`: Output predicted points for each player.
+- `players_timeseries.csv`: Feature-engineered player data for ML.
+- `predicted_next_gw.csv`: Output predicted points for each player.
+- `optimal_squad.json`: Full squad, starting XI, bench, captain, vice-captain, and formation for frontend use.
 - `requirements.txt`: Python dependencies.
 
 ## Contributing
