@@ -169,9 +169,12 @@ final_columns += [
     'next_opponent_strength_defence_home','next_opponent_strength_defence_away'
 ]
 
+import os
 df = pd.DataFrame(all_rows)
 df = df.fillna(0).infer_objects(copy=False)
 df = df[final_columns]
 df = df.sort_values('player_id')
+# Ensure 'data' directory exists
+os.makedirs('data', exist_ok=True)
 df.to_csv('data/players.csv', index=False)
 print('Exported correct history_past data for all players to data/players.csv.')
