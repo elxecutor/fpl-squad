@@ -52,31 +52,61 @@ players_info = pd.read_csv('data/players.csv', usecols=['player_id','chance_of_p
 # Merge info into predictions
 df = df.merge(players_info, on='player_id', how='left')
 # Filter out players with low chance or no minutes
-df = df[(df['chance_of_playing_next_round'] == 100) & (df['chance_of_playing_this_round'] == 100) & (df['minutes'] > 0)]
+# Filter out players with low chance or no minutes, and exclude those flagged as injured/suspended if such columns exist
+filter_criteria = (
+    (df['chance_of_playing_next_round'] >= 90) &
+    (df['chance_of_playing_this_round'] >= 90) &
+    (df['minutes'] > 0)
+)
+if 'status' in df.columns:
+    # Exclude players flagged as 'injured', 'suspended', or 'unavailable'
+    filter_criteria &= ~df['status'].isin(['injured', 'suspended', 'unavailable'])
+df = df[filter_criteria].copy()
 
 # Select optimal squad
-squad = []
-used_budget = 0
-team_counter = Counter()
-position_counter = Counter()
-for _, row in df.sort_values('predicted_next_gw', ascending=False).iterrows():
-    cost = int(row['now_cost'])
-    team = row['team_name']
-    pos = row['position']
-    # Check constraints
-    if used_budget + cost > BUDGET:
-        continue
-    if team_counter[team] >= MAX_PER_TEAM:
-        continue
-    if position_counter[pos] >= POSITION_LIMITS[pos]:
-        continue
-    squad.append(row)
-    used_budget += cost
-    team_counter[team] += 1
-    position_counter[pos] += 1
-    if len(squad) == SQUAD_SIZE:
-        break
-squad_df = pd.DataFrame(squad)
+
+# Smarter greedy squad selection
+def select_optimal_squad(df, budget, squad_size, max_per_team, position_limits):
+    df = df.copy()
+    df['value_per_cost'] = df['predicted_next_gw'] / df['now_cost']
+    squad = []
+    used_budget = 0
+    team_counter = Counter()
+    position_counter = Counter()
+    remaining_positions = position_limits.copy()
+
+    for _ in range(squad_size):
+        # Scarcity: fewer remaining slots = higher scarcity
+        df['scarcity'] = df['position'].map(lambda pos: 1 / (remaining_positions[pos] if remaining_positions[pos] > 0 else 1e-6))
+        # Dynamic priority: value per cost * scarcity
+        df['priority'] = df['value_per_cost'] * df['scarcity']
+        # Filter out players who can't be picked due to constraints
+        candidates = df[
+            (df['now_cost'] + used_budget <= budget) &
+            (df['team_name'].map(lambda t: team_counter[t] < max_per_team)) &
+            (df['position'].map(lambda p: position_counter[p] < position_limits[p]))
+        ]
+        if candidates.empty:
+            break
+        # Pick the highest priority candidate
+        pick = candidates.sort_values('priority', ascending=False).iloc[0]
+        squad.append(pick)
+        used_budget += int(pick['now_cost'])
+        team_counter[pick['team_name']] += 1
+        position_counter[pick['position']] += 1
+        remaining_positions[pick['position']] -= 1
+        # Remove picked player from pool
+        df = df[df['player_name'] != pick['player_name']]
+
+    return pd.DataFrame(squad)
+
+squad_df = select_optimal_squad(
+    df,
+    BUDGET,
+    SQUAD_SIZE,
+    MAX_PER_TEAM,
+    POSITION_LIMITS
+)
 
 
 # Choose formation: set here or optimize
