@@ -15,6 +15,7 @@ Tools for extracting, predicting, and optimizing Fantasy Premier League (FPL) sq
 - **Data Extraction & Feature Engineering**: Reshapes and engineers FPL player data for ML prediction.
 - **ML Prediction**: Uses Ridge and XGBoost (Optuna tuning) to predict next gameweek points for each player.
 - **Squad Optimization**: Selects the optimal 15-player squad, starting XI, captain, vice-captain, and bench under FPL rules and budget constraints.
+- **Transfer Suggestions**: Analyzes your current squad and recommends transfers to maximize predicted points (accounting for transfer costs).
 - **Dynamic Formations**: Automatically selects the best formation (or user-specified) for the starting XI.
 - **Bench Output**: Clearly separates starting XI and bench in both console and JSON output.
 - **JSON Export**: Outputs full squad, starting XI, bench, captain, vice-captain, and formation to `optimal_squad.json` for frontend integration.
@@ -51,16 +52,23 @@ pip install -r requirements.txt
 	python squad_optimizer.py 3-5-2
 	```
 	This will output the optimal squad, starting XI (sorted by position), bench, captain, vice-captain, and formation in both console and `optimal_squad.json`.
+5. **Suggest transfers for existing squad**:
+	```bash
+	python transfer_optimizer.py [optional_squad.json]
+	```
+	If no file is provided, it will prompt you to enter your current 15-man squad player names interactively. If a JSON file is provided (like `data/updated_squad.json`), it will analyze that squad. Suggests the best transfer to improve predicted points (accounting for transfer costs). Outputs the recommendation to console and saves the updated squad to `data/updated_squad.json`.
 
 ## File Overview
 - `export.py`: Extracts and flattens FPL player data from the API to `players.csv`.
 - `mvp_pipeline.py`: Reshapes and engineers features for ML prediction, outputs `players_timeseries.csv`.
 - `train_model.py`: Trains ML models and outputs predicted points to `predicted_next_gw.csv`.
 - `squad_optimizer.py`: Loads predictions, optimizes squad selection, outputs starting XI, bench, captain, vice-captain, and formation in both console and `optimal_squad.json`.
+- `transfer_optimizer.py`: Analyzes a current squad (entered interactively) and suggests the best transfer to improve predicted points, outputs to console and `data/updated_squad.json`.
 - `players.csv`: Output player data for ML and optimization.
 - `players_timeseries.csv`: Feature-engineered player data for ML.
 - `predicted_next_gw.csv`: Output predicted points for each player.
 - `optimal_squad.json`: Full squad, starting XI, bench, captain, vice-captain, and formation for frontend use.
+- `updated_squad.json`: Updated squad after applying the recommended transfer.
 - `requirements.txt`: Python dependencies.
 
 ## Contributing
