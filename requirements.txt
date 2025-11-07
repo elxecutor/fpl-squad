@@ -3,3 +3,8 @@ numpy
 scikit-learn
 xgboost
 pulp
+requests
+optuna
+python-dotenv
+beautifulsoup4
+fpl
